@@ -1,14 +1,17 @@
-import sys
+import binascii
 import operator
-import secrets
-from PyQt5.QtWidgets import QApplication, QWidget, QFileDialog
-from PyQt5 import QtCore
-from main_window import Ui_Form
-from error_window import Ui_widget
-from textwrap import wrap
+import os
+import sys
 from functools import reduce
-from constants import INITIAL_PERMUTATION, INVERSE_PERMUTATION, SUB_BOX, PERMUTATION, \
+from textwrap import wrap
+
+from PyQt5 import QtCore
+from PyQt5.QtWidgets import QApplication, QWidget, QFileDialog
+
+from constants import START_PERMUTATION, FINAL_PERMUTATION, SUB_BOX, PERMUTATION, \
     EXPANSION, PERMUTED_CHOICE_1, PERMUTED_CHOICE_2, ROTATES
+from error_window import Ui_widget
+from main_window import Ui_Form
 
 
 class MyException(Exception):
@@ -34,7 +37,7 @@ class DES:
     def __init__(self, text, key=None) -> None:
         self.text = text
         if key is None:
-            self.key = secrets.token_hex(8)
+            self.key = binascii.hexlify(os.urandom(8)).decode('ascii')
         else:
             if len(self.to_bin(key)) != 64:
                 raise MyException('Ключ должен состоять из 64 бит.')
@@ -45,20 +48,20 @@ class DES:
         return self.key
 
     def code_text(self) -> str:
-        encrypted_list = []
-        for i in self.slice_mess(self.text):
+        encrypted_bits = list()
+        for i in self.slice_text(self.text):
             bin_mess, bin_key = self.to_bin(i), self.to_bin(self.key)
 
             permuted_key, permuted_block = self.permute(
-                bin_key, PERMUTED_CHOICE_1), self.permute(bin_mess, INITIAL_PERMUTATION)
+                bin_key, PERMUTED_CHOICE_1), self.permute(bin_mess, START_PERMUTATION)
 
             key_list = self.key_gen(
                 permuted_key[: len(permuted_key) // 2], permuted_key[len(permuted_key) // 2:])
 
-            encrypted_list.append(''.join([hex(int(i, 2))[2:].zfill(
+            encrypted_bits.append(''.join([hex(int(i, 2))[2:].zfill(
                 2).upper() for i in self.des(permuted_block, key_list)]))
 
-        return ''.join(encrypted_list)
+        return ''.join(encrypted_bits)
 
     def decode_text(self) -> str:
         temp_li = []
@@ -66,7 +69,7 @@ class DES:
             bin_mess, bin_key = self.to_bin(i), self.to_bin(self.key)
 
             permuted_key, permuted_block = self.permute(
-                bin_key, PERMUTED_CHOICE_1), self.permute(bin_mess, INITIAL_PERMUTATION)
+                bin_key, PERMUTED_CHOICE_1), self.permute(bin_mess, START_PERMUTATION)
 
             key_list = self.key_gen(
                 permuted_key[: len(permuted_key) // 2], permuted_key[len(permuted_key) // 2:])
@@ -78,7 +81,7 @@ class DES:
             [[chr(int(j, 16)) for j in wrap(i, 2) if int(j, 16) != 0] for i in temp_li]))
 
     @staticmethod
-    def slice_mess(string) -> list:
+    def slice_text(string) -> list:
         return [i.zfill(16) for i in wrap(''.join([hex(ord(i))[2:] for i in string]), 16)]
 
     @staticmethod
@@ -86,8 +89,8 @@ class DES:
         return ''.join([bin(int(i, 16))[2:].zfill(4) for i in s])
 
     @staticmethod
-    def permute(block, box) -> str:
-        return ''.join([block[i] for i in box])
+    def permute(block, permutation_array) -> str:
+        return ''.join([block[i] for i in permutation_array])
 
     @staticmethod
     def xor(arg_1, arg_2) -> str:
@@ -110,7 +113,7 @@ class DES:
 
         return li
 
-    def f(self, block, key):
+    def f(self, block, key) -> str:
         final = []
 
         for j, i in enumerate(wrap(self.xor(self.permute(block, EXPANSION), key), 6)):
@@ -125,12 +128,12 @@ class DES:
 
         return self.permute(''.join(final), PERMUTATION)
 
-    def des(self, block, key_array):
+    def des(self, block, key_array) -> str:
 
         left, right = block[0: len(block) // 2], block[len(block) // 2:]
         for j, i in zip(range(1, 17), key_array):
             right, left = self.xor(self.f(right, i), left), right
-        return wrap(self.permute(right + left, INVERSE_PERMUTATION), 8)
+        return wrap(self.permute(right + left, FINAL_PERMUTATION), 8)
 
 
 class MainWindow(QWidget, Ui_Form):
@@ -151,7 +154,6 @@ class MainWindow(QWidget, Ui_Form):
     def code_text_des(self) -> None:
         text = self.code_start.toPlainText()
         text = text.replace('\n', 'MYNULL')
-        print(text)
         if len(text) == 0:
             self.error_window = ErrorWindow('Текст для кодирования отсутствует.')
             self.error_window.show()
@@ -204,7 +206,7 @@ class MainWindow(QWidget, Ui_Form):
             file_path = filegialog[0].toLocalFile()
             if file_path == '':
                 return
-            file = open(file_path, 'r')
+            file = open(file_path, 'r', encoding='UTF-8')
             text = file.read()
             self.code_start.setText(text)
 
@@ -216,7 +218,7 @@ class MainWindow(QWidget, Ui_Form):
             file_path = filegialog[0].toLocalFile()
             if file_path == '':
                 return
-            file = open(file_path, 'r')
+            file = open(file_path, 'r', encoding='UTF-8')
             text = file.read()
             self.decode_start.setText(text)
 
@@ -233,7 +235,7 @@ class MainWindow(QWidget, Ui_Form):
             file_path = filegialog[0].toLocalFile()
             if file_path == '':
                 return
-            file = open(file_path, 'w')
+            file = open(file_path, 'w', encoding='UTF-8')
             file.write(text)
 
     @QtCore.pyqtSlot()
@@ -249,7 +251,7 @@ class MainWindow(QWidget, Ui_Form):
             file_path = filegialog[0].toLocalFile()
             if file_path == '':
                 return
-            file = open(file_path, 'w')
+            file = open(file_path, 'w', encoding='UTF-8')
             file.write(text)
 
 
